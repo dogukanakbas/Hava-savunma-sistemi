@@ -18,36 +18,23 @@ def generate_launch_description():
             description='Enable RViz visualization'
         ),
         
-        # Aircraft Controller
+        # Hedef Takip Kontrolcüsü
         Node(
-            package='air_defense_system',
-            executable='aircraft_controller.py',
-            name='aircraft_controller',
+            package='target_tracking_system',
+            executable='target_tracking_controller.py',
+            name='target_tracking_controller',
             output='screen',
             parameters=[{
                 'use_sim_time': LaunchConfiguration('use_sim_time')
             }]
         ),
-        
-        # RRT Path Planner
-        Node(
-            package='air_defense_system',
-            executable='rrt_path_planner.py',
-            name='rrt_path_planner',
-            output='screen',
-            parameters=[{
-                'use_sim_time': LaunchConfiguration('use_sim_time')
-            }]
-        ),
-        
-
         
         # RViz (optional)
         Node(
             package='rviz2',
             executable='rviz2',
             name='rviz2',
-            arguments=['-d', 'config/air_defense.rviz'],
+            arguments=['-d', 'config/target_tracking.rviz'],
             condition=LaunchConfiguration('enable_visualization')
         )
     ])

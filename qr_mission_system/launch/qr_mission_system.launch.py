@@ -18,36 +18,34 @@ def generate_launch_description():
             description='Enable RViz visualization'
         ),
         
-        # Aircraft Controller
+        # QR Dalış Kontrolcüsü
         Node(
-            package='air_defense_system',
-            executable='aircraft_controller.py',
-            name='aircraft_controller',
+            package='qr_mission_system',
+            executable='qr_dive_controller.py',
+            name='qr_dive_controller',
             output='screen',
             parameters=[{
                 'use_sim_time': LaunchConfiguration('use_sim_time')
             }]
         ),
         
-        # RRT Path Planner
+        # QR Pozisyon Yayınlayıcısı
         Node(
-            package='air_defense_system',
-            executable='rrt_path_planner.py',
-            name='rrt_path_planner',
+            package='qr_mission_system',
+            executable='qr_position_publisher.py',
+            name='qr_position_publisher',
             output='screen',
             parameters=[{
                 'use_sim_time': LaunchConfiguration('use_sim_time')
             }]
         ),
-        
-
         
         # RViz (optional)
         Node(
             package='rviz2',
             executable='rviz2',
             name='rviz2',
-            arguments=['-d', 'config/air_defense.rviz'],
+            arguments=['-d', 'config/qr_mission.rviz'],
             condition=LaunchConfiguration('enable_visualization')
         )
     ])
