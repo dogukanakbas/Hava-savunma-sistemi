@@ -76,10 +76,12 @@ class RRTPathPlanner(Node):
         """HSS koordinat topic'inden gelen verileri işler (HssKoordinatDizi)"""
         self.get_logger().info(f'HSS koordinat mesajı alındı: {len(msg.hss_koordinat_bilgileri)} adet koordinat')
         
-        # Dizideki her koordinatı işle (sadece yasaklı alan bilgilerini)
+        # Dizideki her koordinatı işle
         for hss_koordinat in msg.hss_koordinat_bilgileri:
-            if hss_koordinat.id > 0:  # Sadece yasaklı alan bilgilerini işle
+            if hss_koordinat.id > 0:  # Yasaklı alan bilgilerini işle
                 self.process_restricted_area(hss_koordinat)
+            elif hss_koordinat.id == -1:  # Hedef nokta bilgisi
+                self.process_target_point(hss_koordinat)
             
     def process_restricted_area(self, hss_koordinat):
         """Yasaklı alan bilgilerini işler (sadece daire şeklinde)"""
@@ -105,6 +107,26 @@ class RRTPathPlanner(Node):
             # Alanı kaldır
             self.restricted_areas = [a for a in self.restricted_areas if a['id'] != hss_koordinat.id]
             self.get_logger().info(f'Yasaklı alan kaldırıldı: ID={hss_koordinat.id}')
+            
+    def process_target_point(self, hss_koordinat):
+        """YKI'dan gelen hedef nokta bilgilerini işler"""
+        # Mevcut konumu başlangıç noktası olarak kullan (gerçek uçak konumu)
+        # Bu kısım uçak kontrolcüsünden alınacak
+        current_pos = (0, 0, 50)  # Varsayılan değer
+        
+        # Hedef noktayı ayarla
+        target_alt = hss_koordinat.yaricap if hss_koordinat.yaricap > 0 else 100
+        goal_pos = (hss_koordinat.enlem, hss_koordinat.boylam, target_alt)
+        
+        self.set_start_goal(current_pos, goal_pos)
+        
+        # Yol planla
+        path = self.plan_path()
+        if path:
+            self.get_logger().info(f'Hedef nokta için yol planlandı: {len(path)} nokta')
+            self.publish_path(path)
+        else:
+            self.get_logger().warn('Hedef nokta için yol bulunamadı!')
             
     def set_start_goal(self, start: Tuple[float, float, float], goal: Tuple[float, float, float]):
         """Başlangıç ve hedef noktalarını ayarlar"""
@@ -270,9 +292,10 @@ class RRTPathPlanner(Node):
         
         for point in path:
             pose = PoseStamped()
-            pose.pose.position.x = point[0]
-            pose.pose.position.y = point[1]
-            pose.pose.position.z = point[2]
+            # Float tipine dönüştür
+            pose.pose.position.x = float(point[0])
+            pose.pose.position.y = float(point[1])
+            pose.pose.position.z = float(point[2])
             path_msg.poses.append(pose)
             
         self.path_pub.publish(path_msg)
@@ -364,17 +387,9 @@ def main(args=None):
     planner = RRTPathPlanner()
     
     try:
-        # Test için başlangıç ve hedef noktaları ayarla
-        planner.set_start_goal((0, 0, 50), (100, 100, 100))
+        # Gerçek uçak modu - YKI'dan gelen verilere göre yol planla
+        planner.get_logger().info('RRT yol planlayıcısı gerçek uçak modunda başlatıldı')
         
-        # Yol planla
-        path = planner.plan_path()
-        if path:
-            planner.get_logger().info(f'Yol bulundu! {len(path)} nokta')
-            planner.publish_path(path)
-        else:
-            planner.get_logger().warn('Yol bulunamadı!')
-            
         rclpy.spin(planner)
         
     except KeyboardInterrupt:

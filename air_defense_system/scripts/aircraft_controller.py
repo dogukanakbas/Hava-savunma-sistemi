@@ -88,6 +88,10 @@ class AircraftController(Node):
         
         self.get_logger().info('Uçak kontrolcüsü başlatıldı - hss_koordinat topic\'ini dinliyor (HssKoordinatDizi)')
         
+        # Gerçek uçak için hedef nokta YKI'dan gelecek
+        self.target_position = None
+        self.get_logger().info('Gerçek uçak modu - hedef nokta YKI\'dan gelecek')
+        
     def hss_coordinate_callback(self, msg):
         """HSS koordinat topic'inden gelen verileri işler (HssKoordinatDizi)"""
         self.get_logger().info(f'HSS koordinat mesajı alındı: {len(msg.hss_koordinat_bilgileri)} adet koordinat')
@@ -97,9 +101,12 @@ class AircraftController(Node):
             if hss_koordinat.id > 0:
                 # Yasaklı alan bilgisi
                 self.process_restricted_area(hss_koordinat)
-            else:
+            elif hss_koordinat.id == 0:
                 # Komut bilgisi (aktif/pasif)
                 self.process_command(hss_koordinat)
+            elif hss_koordinat.id == -1:
+                # Hedef nokta bilgisi (YKI'dan gelen)
+                self.process_target_point(hss_koordinat)
             
     def process_restricted_area(self, hss_koordinat):
         """Yasaklı alan bilgilerini işler"""
@@ -141,6 +148,28 @@ class AircraftController(Node):
                 # Tüm yasaklı alanları temizle
                 self.restricted_areas.clear()
                 self.get_logger().info('Tüm yasaklı alanlar temizlendi')
+                
+    def process_target_point(self, hss_koordinat):
+        """YKI'dan gelen hedef nokta bilgilerini işler"""
+        # Yarıçap alanını yükseklik olarak kullan
+        target_alt = hss_koordinat.yaricap if hss_koordinat.yaricap > 0 else 100
+        
+        self.target_position = {
+            'lat': hss_koordinat.enlem,
+            'lon': hss_koordinat.boylam,
+            'alt': target_alt
+        }
+        
+        self.get_logger().info(f'Yeni hedef nokta alındı: {self.target_position}')
+        
+        # Eğer normal görev modundaysa hemen hareket et
+        if self.original_mission_active and not self.air_defense_active:
+            self.get_logger().info('Hedef noktaya hareket başlatılıyor...')
+            self.send_position_command(
+                self.target_position['lat'],
+                self.target_position['lon'],
+                self.target_position['alt']
+            )
             
     def gps_callback(self, msg):
         """GPS verilerini alır"""
@@ -225,8 +254,8 @@ class AircraftController(Node):
             return
             
         if not self.air_defense_active:
-            # Normal görev modunda
-            if self.original_mission_active:
+            # Normal görev modunda - YKI'dan gelen komutlara göre hareket et
+            if self.original_mission_active and self.target_position:
                 self.execute_normal_mission()
             return
             
@@ -238,19 +267,31 @@ class AircraftController(Node):
         ):
             self.get_logger().warn('Yasaklı alanda bulunuyor! Acil kaçınma manevrası başlatılıyor...')
             self.execute_emergency_avoidance()
+        else:
+            # Güvenli bölgedeyse, normal göreve devam et
+            if self.original_mission_active and self.target_position:
+                self.execute_normal_mission()
             
     def execute_normal_mission(self):
-        """Normal görev prosedürü"""
-        # Burada normal görev kodları olacak
-        # Örneğin: waypoint takibi, görev yürütme vb.
-        pass
+        """Normal görev prosedürü - YKI'dan gelen hedef noktaya git"""
+        if self.target_position:
+            # Hedef noktaya git
+            self.send_position_command(
+                self.target_position['lat'], 
+                self.target_position['lon'], 
+                self.target_position['alt']
+            )
         
     def execute_emergency_avoidance(self):
         """Acil kaçınma manevrası"""
         # En yakın güvenli noktaya git
         safe_point = self.find_nearest_safe_point()
         if safe_point:
+            self.get_logger().info(f'Güvenli noktaya gidiliyor: {safe_point}')
             self.send_position_command(safe_point['lat'], safe_point['lon'], safe_point['alt'])
+        else:
+            self.get_logger().error('Güvenli nokta bulunamadı! Acil iniş başlatılıyor...')
+            self.emergency_mode = True
             
     def find_nearest_safe_point(self) -> Optional[Dict]:
         """En yakın güvenli noktayı bulur"""
@@ -288,21 +329,24 @@ class AircraftController(Node):
         pose.header.frame_id = "map"
         
         # Basit dönüşüm (gerçek uygulamada daha hassas olmalı)
-        pose.pose.position.x = (lon - self.current_position['lon']) * 111000
-        pose.pose.position.y = (lat - self.current_position['lat']) * 111000
-        pose.pose.position.z = alt - self.current_position['alt']
+        pose.pose.position.x = float((lon - self.current_position['lon']) * 111000)
+        pose.pose.position.y = float((lat - self.current_position['lat']) * 111000)
+        pose.pose.position.z = float(alt - self.current_position['alt'])
         
+        self.get_logger().info(f'Pozisyon komutu gönderiliyor: x={pose.pose.position.x:.2f}, y={pose.pose.position.y:.2f}, z={pose.pose.position.z:.2f}')
         self.target_pose_pub.publish(pose)
         
     def publish_status(self):
         """Durum bilgisini yayınlar"""
-        status = "NORMAL_MISSION"
+        status = "WAITING_FOR_COMMAND"
         if self.emergency_mode:
             status = "EMERGENCY"
         elif self.air_defense_active:
             status = "AIR_DEFENSE_ACTIVE"
-        elif not self.original_mission_active:
-            status = "MISSION_PAUSED"
+        elif self.original_mission_active and self.target_position:
+            status = "MISSION_ACTIVE"
+        elif self.original_mission_active:
+            status = "WAITING_FOR_TARGET"
             
         status_msg = String()
         status_msg.data = status
